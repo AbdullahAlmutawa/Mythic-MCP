@@ -10,8 +10,6 @@ An MCP server that gives AI assistants full operational control of the [Mythic C
 
 The fix patches `payloads.go` (~line 236) in the SDK dependency to include `wrapped_payload` in the mutation map when provided.
 
-**File:** `$GOPATH/pkg/mod/github.com/nbaertsch/mythic-sdk-go@.../pkg/mythic/payloads.go`
-
 ## Setup
 
 ```bash
