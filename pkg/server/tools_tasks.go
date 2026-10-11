@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nbaertsch/mythic-sdk-go/pkg/mythic"
@@ -633,11 +635,25 @@ func (s *Server) handleWaitForTask(ctx context.Context, req *mcp.CallToolRequest
 	}, task, nil
 }
 
-// handleGetTaskOutput retrieves task output/responses
+// handleGetTaskOutput retrieves task output/responses.
+// Mythic stores agent output base64-encoded in response_text. This handler
+// auto-decodes it so callers get readable text instead of opaque base64 blobs.
 func (s *Server) handleGetTaskOutput(ctx context.Context, req *mcp.CallToolRequest, args getTaskOutputArgs) (*mcp.CallToolResult, any, error) {
 	output, err := s.mythicClient.GetTaskOutput(ctx, args.TaskID)
 	if err != nil {
 		return nil, nil, translateError(err)
+	}
+
+	// Build human-readable output with auto-decoded response text
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Output for task %d (%d responses):\n\n", args.TaskID, len(output)))
+
+	for i, resp := range output {
+		decoded := tryBase64Decode(resp.ResponseText)
+		if i > 0 {
+			sb.WriteString("\n---\n")
+		}
+		sb.WriteString(decoded)
 	}
 
 	data, err := json.MarshalIndent(output, "", "  ")
@@ -648,10 +664,26 @@ func (s *Server) handleGetTaskOutput(ctx context.Context, req *mcp.CallToolReque
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{
-				Text: fmt.Sprintf("Output for task %d (%d responses):\n\n%s", args.TaskID, len(output), string(data)),
+				Text: sb.String() + "\n\n[Raw response objects]:\n" + string(data),
 			},
 		},
 	}, wrapList(output), nil
+}
+
+// tryBase64Decode attempts to base64-decode a string. If the result is valid
+// UTF-8 text, it returns the decoded version. Otherwise returns the original.
+func tryBase64Decode(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(s))
+	if err != nil {
+		return s
+	}
+	if utf8.Valid(decoded) {
+		return string(decoded)
+	}
+	return s
 }
 
 // handleReissueTask reissues a task

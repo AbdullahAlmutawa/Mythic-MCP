@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -496,14 +498,19 @@ func (s *Server) handleDownloadPayload(ctx context.Context, req *mcp.CallToolReq
 		}, resp, nil
 	}
 
-	// Fallback: base64 encoding
-	encodedData := base64.StdEncoding.EncodeToString(payloadData)
+	// Fallback: save to a temp file on disk (base64 is impractical for multi-MB payloads)
+	tmpDir := os.TempDir()
+	filename := args.PayloadUUID + ".bin"
+	filePath := filepath.Join(tmpDir, filename)
 
-	return &mcp.CallToolResult{
+	if err := os.WriteFile(filePath, payloadData, 0700); err != nil {
+		// If disk write fails, fall back to base64
+		encodedData := base64.StdEncoding.EncodeToString(payloadData)
+		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				&mcp.TextContent{
-					Text: fmt.Sprintf("Successfully downloaded payload %s\nSize: %d bytes (raw), %d bytes (base64)",
-						args.PayloadUUID, len(payloadData), len(encodedData)),
+					Text: fmt.Sprintf("Successfully downloaded payload %s\nSize: %d bytes (raw), %d bytes (base64)\nWARNING: Could not save to disk (%v), returning base64.",
+						args.PayloadUUID, len(payloadData), len(encodedData), err),
 				},
 			},
 		}, map[string]interface{}{
@@ -511,6 +518,20 @@ func (s *Server) handleDownloadPayload(ctx context.Context, req *mcp.CallToolReq
 			"payload_data": encodedData,
 			"size_raw":     len(payloadData),
 			"size_base64":  len(encodedData),
+		}, nil
+	}
+
+	return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("Payload %s saved to disk.\nPath: %s\nSize: %d bytes\nThe file is ready to deploy — chmod +x if needed.",
+						args.PayloadUUID, filePath, len(payloadData)),
+				},
+			},
+		}, map[string]interface{}{
+			"payload_uuid": args.PayloadUUID,
+			"file_path":    filePath,
+			"size":         len(payloadData),
 		}, nil
 }
 

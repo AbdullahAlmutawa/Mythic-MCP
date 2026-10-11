@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nbaertsch/Mythic-MCP/pkg/filestore"
@@ -222,19 +224,38 @@ func (s *Server) handleDownloadFile(ctx context.Context, req *mcp.CallToolReques
 		}, resp, nil
 	}
 
-	// Fallback: base64 encoding
-	encodedData := base64.StdEncoding.EncodeToString(fileData)
+	// Fallback: save to disk (base64 is impractical for large files)
+	tmpDir := os.TempDir()
+	filename := args.FileUUID + ".bin"
+	filePath := filepath.Join(tmpDir, filename)
 
-	return &mcp.CallToolResult{
+	if err := os.WriteFile(filePath, fileData, 0600); err != nil {
+		encodedData := base64.StdEncoding.EncodeToString(fileData)
+		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				&mcp.TextContent{
-					Text: fmt.Sprintf("Successfully downloaded file %s\nSize: %d bytes\n\nFile data is base64-encoded in the metadata.", args.FileUUID, len(fileData)),
+					Text: fmt.Sprintf("Successfully downloaded file %s\nSize: %d bytes\nWARNING: Could not save to disk (%v), returning base64.",
+						args.FileUUID, len(fileData), err),
 				},
 			},
 		}, map[string]interface{}{
 			"file_uuid": args.FileUUID,
 			"size":      len(fileData),
 			"file_data": encodedData,
+		}, nil
+	}
+
+	return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{
+					Text: fmt.Sprintf("File %s saved to disk.\nPath: %s\nSize: %d bytes",
+						args.FileUUID, filePath, len(fileData)),
+				},
+			},
+		}, map[string]interface{}{
+			"file_uuid": args.FileUUID,
+			"file_path": filePath,
+			"size":      len(fileData),
 		}, nil
 }
 
